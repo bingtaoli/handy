@@ -16,7 +16,7 @@ struct EventBases: private noncopyable {
 //事件派发器，可管理定时器，连接，超时连接
 struct EventBase: public EventBases {
     //taskCapacity指定任务队列的大小，0无限制
-    EventBase(int taskCapacity=0);
+    EventBase(int taskCapacity=0, int threads=10);
     ~EventBase();
     //处理已到期的事件,waitMs表示若无当前需要处理的任务，需要等待的时间
     void loop_once(int waitMs);
@@ -46,6 +46,8 @@ struct EventBase: public EventBases {
 
 public:
     std::unique_ptr<EventsImp> imp_;
+    int threads_;
+    ThreadPool thread_pool_;  //处理客户端请求的工作线程
 };
 
 //多线程的事件派发器
@@ -86,8 +88,14 @@ struct Channel: private noncopyable {
     bool writeEnabled();
 
     //处理读写事件
-    void handleRead() { readcb_(); }
-    void handleWrite() { writecb_(); }
+    void handleRead() { 
+        trace("enter channel %lld handleRead", id_);
+        if (nullptr != readcb_) {
+            readcb_(); 
+        }
+        trace("left channel %lld handleRead", id_);
+    }
+    void handleWrite() { if (writecb_)  writecb_(); }
 protected:
     EventBase* base_;
     PollerBase* poller_;

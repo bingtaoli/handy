@@ -33,10 +33,12 @@ struct PollerEpoll : public PollerBase{
 
 PollerBase* createPoller() { return new PollerEpoll(); }
 
-PollerEpoll::PollerEpoll(){
+PollerEpoll::PollerEpoll():threads(10),thread_pool_(threads)
+{
     fd_ = epoll_create1(EPOLL_CLOEXEC);
     fatalif(fd_<0, "epoll_create error %d %s", errno, strerror(errno));
     info("poller epoll %d created", fd_);
+    info("thread poll started threads:%d", threads);
 }
 
 PollerEpoll::~PollerEpoll() {
@@ -119,14 +121,18 @@ struct PollerKqueue : public PollerBase {
     void removeChannel(Channel* ch) override;
     void updateChannel(Channel* ch) override;
     void loop_once(int waitMs) override;
+    int threads;
+    ThreadPool thread_pool_;
 };
 
 PollerBase* createPoller() { return new PollerKqueue(); }
 
-PollerKqueue::PollerKqueue(){
+PollerKqueue::PollerKqueue():threads(10),thread_pool_(threads)
+{
     fd_ = kqueue();
     fatalif(fd_ <0, "kqueue error %d %s", errno, strerror(errno));
     info("poller kqueue %d created", fd_);
+    info("thread poll started threads:%d", threads);
 }
 
 PollerKqueue::~PollerKqueue() {
@@ -209,8 +215,9 @@ void PollerKqueue::loop_once(int waitMs) {
             if (!(ke.flags & EV_EOF) && ch->writeEnabled()) {
                 trace("channel %lld fd %d handle write", (long long)ch->id(), ch->fd());
                 ch->handleWrite();
-            } else if ((ke.flags & EV_EOF) || ch->readEnabled()) {
+            } else if (!(ke.flags & EV_EOF) || ch->readEnabled()) {
                 trace("channel %lld fd %d handle read", (long long)ch->id(), ch->fd());
+                //lee: 如果read都在多线程处理，处理得不够快，会重复有可读事件poll过来导致重复处理
                 ch->handleRead();
             } else {
                 fatal("unexpected epoll events %d", ch->events());

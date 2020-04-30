@@ -91,9 +91,8 @@ template<typename T> void SafeQueue<T>::wait_ready(
     }
 }
 
-
-
-template<typename T> bool SafeQueue<T>::pop_wait(T* v, int waitMs) {
+template<typename T> 
+bool SafeQueue<T>::pop_wait(T* v, int waitMs) {
     std::unique_lock<std::mutex> lk(*this);
     wait_ready(lk, waitMs);
     if (items_.empty()) {
@@ -104,7 +103,8 @@ template<typename T> bool SafeQueue<T>::pop_wait(T* v, int waitMs) {
     return true;
 }
 
-template<typename T> T SafeQueue<T>::pop_wait(int waitMs) {
+template<typename T> 
+T SafeQueue<T>::pop_wait(int waitMs) {
     std::unique_lock<std::mutex> lk(*this);
     wait_ready(lk, waitMs);
     if (items_.empty()) {

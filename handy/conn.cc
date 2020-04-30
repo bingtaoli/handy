@@ -83,6 +83,7 @@ void TcpConn::close() {
 }
 
 void TcpConn::cleanup(const TcpConnPtr& con) {
+    trace("clean con %d", channel_->fd());
     if (readcb_ && input_.size()) {
         readcb_(con);
     }
@@ -114,6 +115,7 @@ void TcpConn::cleanup(const TcpConnPtr& con) {
 }
 
 void TcpConn::handleRead(const TcpConnPtr& con) {
+    trace("fd %d handle read", channel_->fd());
     if (state_ == State::Handshaking && handleHandshake(con)) {
         return;
     }
@@ -125,13 +127,20 @@ void TcpConn::handleRead(const TcpConnPtr& con) {
             trace("channel %lld fd %d readed %d bytes", (long long)channel_->id(), channel_->fd(), rd);
         }
         if (rd == -1 && errno == EINTR) {
+            trace("EINTR happen %d", channel_->fd());
             continue;
         } else if (rd == -1 && (errno == EAGAIN || errno == EWOULDBLOCK) ) {
             for(auto& idle: idleIds_) {
                 handyUpdateIdle(getBase(), idle);
             }
             if (readcb_ && input_.size()) {
+                //lee: 多线程，处理请求的逻辑
                 readcb_(con);
+                /*
+                base_->thread_pool_.addTask([=]{
+                    readcb_(con);
+                });
+                */
             }
             break;
         } else if (channel_->fd() == -1 || rd == 0 || rd == -1) {
@@ -144,12 +153,15 @@ void TcpConn::handleRead(const TcpConnPtr& con) {
 }
 
 int TcpConn::handleHandshake(const TcpConnPtr& con) {
+    trace("enter handle handshake %d", channel_->fd());
     fatalif(state_ != Handshaking, "handleHandshaking called when state_=%d", state_);
     struct pollfd pfd;
     pfd.fd = channel_->fd();
     pfd.events = POLLOUT | POLLERR;
     int r = poll(&pfd, 1, 0);
     if (r == 1 && pfd.revents == POLLOUT) {
+        //lee: 客户端发起连接请求，会触发accept fd的read事件
+        //cfd只监听read事件就行了，等待客户端请求数据
         channel_->enableReadWrite(true, false);
         state_ = State::Connected;
         if (state_ == State::Connected) {
@@ -169,9 +181,11 @@ int TcpConn::handleHandshake(const TcpConnPtr& con) {
 }
 
 void TcpConn::handleWrite(const TcpConnPtr& con) {
+    trace("enter handle write %d", channel_->fd());
     if (state_ == State::Handshaking) {
         handleHandshake(con);
     } else if (state_ == State::Connected) {
+        trace("enter send some data %d", channel_->fd());
         ssize_t sended = isend(output_.begin(), output_.size());
         output_.consume(sended);
         if (output_.empty() && writablecb_) {
@@ -345,8 +359,10 @@ void TcpServer::handleAccept() {
             }
         };
         if (b == base_) {
+            trace("this is base add con");
             addcon();
         } else {
+            trace("this is not base add con");
             b->safeCall(move(addcon));
         }
     }

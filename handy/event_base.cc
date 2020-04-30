@@ -64,6 +64,7 @@ struct EventsImp {
     //eventbase functions
     EventBase& exit() {exit_ = true; wakeup(); return *base_;}
     bool exited() { return exit_; }
+    //移动构造函数
     void safeCall(Task&& task) { tasks_.push(move(task)); wakeup(); }
     void loop();
     void loop_once(int waitMs) { poller_->loop_once(std::min(waitMs, nextTimeout_)); handleTimeouts(); }
@@ -76,7 +77,8 @@ struct EventsImp {
     TimerId runAt(int64_t milli, Task&& task, int64_t interval);
 };
 
-EventBase::EventBase(int taskCapacity) {
+EventBase::EventBase(int taskCapacity, int threads) : threads_(threads), thread_pool_(threads)
+{
     imp_.reset(new EventsImp(this, taskCapacity));
     imp_->init();
 }
@@ -128,6 +130,7 @@ void EventsImp::init() {
     fatalif(r, "addFdFlag failed %d %s", errno, strerror(errno));
     trace("wakeup pipe created %d %d", wakeupFds_[0], wakeupFds_[1]);
     Channel* ch = new Channel(base_, wakeupFds_[0], kReadEvent);
+    //lee: 主线程内工作？会不会阻塞主线程的poll？
     ch->onRead([=] {
         char buf[1024];
         int r = ch->fd() >= 0 ? ::read(ch->fd(), buf, sizeof buf) : 0;
@@ -279,6 +282,7 @@ Channel::Channel(EventBase* base, int fd, int events): base_(base), fd_(fd), eve
 }
 
 Channel::~Channel() {
+    trace("descontruct channel %lld", id_);
     close();
 }
 
@@ -288,6 +292,7 @@ void Channel::enableRead(bool enable) {
     } else {
         events_ &= ~kReadEvent;
     }
+    trace("fd %d enable read", fd_);
     poller_->updateChannel(this);
 }
 
@@ -297,6 +302,7 @@ void Channel::enableWrite(bool enable) {
     } else {
         events_ &= ~kWriteEvent;
     }
+    trace("fd %d enable write", fd_);
     poller_->updateChannel(this);
 }
 
@@ -311,6 +317,7 @@ void Channel::enableReadWrite(bool readable, bool writable) {
     } else {
         events_ &= ~kWriteEvent;
     }
+    trace("fd %d enable read and write", fd_);
     poller_->updateChannel(this);
 }
 
@@ -319,8 +326,11 @@ void Channel::close() {
         trace("close channel %ld fd %d", (long)id_, fd_);
         poller_->removeChannel(this);
         ::close(fd_);
+        trace("closed %ld fd %d", (long)id_, fd_);
         fd_ = -1;
+        readcb_ = nullptr;
         handleRead();
+        trace("close finished");
     }
 }
 
